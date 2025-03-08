@@ -75,8 +75,8 @@ async def start_command(message: Message):
         "/list - Показать отслеживаемые каналы\n"
         "/id [ссылка] - Показать ID канала\n"
         "/status - Проверить состояние бота\n"
-        "/change_promt [текст] - Изменить промпт для переписывания\n"
-        "/show_promt - Показать текущий промпт"
+        "/change_prompt [текст] - Изменить промпт для переписывания\n"
+        "/show_prompt - Показать текущий промпт"
     )
     await message.answer(help_text)
 
@@ -242,7 +242,7 @@ async def change_prompt(message: Message):
     save_channels()
     await message.reply(f"✅ Промпт успешно обновлен:\n`{new_prompt}`", parse_mode="Markdown")
 
-@dp.message(Command("show_promt"))
+@dp.message(Command("show_prompt"))
 async def show_prompt(message: Message):
     await message.reply(
         f"📝 Текущий промпт:\n`{current_prompt}`", 
