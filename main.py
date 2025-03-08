@@ -9,6 +9,7 @@ from config import api_id, api_hash, bot_token, api_ai
 from telethon import types
 from openai import AsyncOpenAI
 
+
 # Настройка логирования
 logging.basicConfig(
     format='[%(levelname)s] %(asctime)s - %(message)s',
@@ -30,18 +31,20 @@ def load_channels():
             data = json.load(f)
             return (
                 set(map(str, data.get("active_channels", []))),
-                str(data.get("main_channel_id")) if data.get("main_channel_id") else None
+                str(data.get("main_channel_id")) if data.get("main_channel_id") else None,
+                data.get("prompt", "Перепиши текст своими словами, но не меняй суть")  # Загрузка промпта
             )
     except (FileNotFoundError, json.JSONDecodeError):
-        return set(), None
+        return set(), None, "Перепиши текст своими словами, но не меняй суть"
     except Exception as e:
         logger.error(f"Ошибка загрузки: {e}")
-        return set(), None
+        return set(), None, "Перепиши текст своими словами, но не меняй суть"
 
 def save_channels():
     data = {
         "active_channels": list(active_channels),
-        "main_channel_id": main_channel_id
+        "main_channel_id": main_channel_id,
+        "prompt": current_prompt  # Сохранение промпта
     }
     try:
         with open(CHANNELS_FILE, "w") as f:
@@ -49,7 +52,8 @@ def save_channels():
     except Exception as e:
         logger.error(f"Ошибка сохранения: {e}")
 
-active_channels, main_channel_id = load_channels()
+# Инициализация переменных
+active_channels, main_channel_id, current_prompt = load_channels()
 
 async def get_channel_id(link: str) -> str:
     """Получение корректного ID канала в формате строки"""
@@ -70,7 +74,9 @@ async def start_command(message: Message):
         "/remove [ссылка] - Удалить канал из отслеживания\n"
         "/list - Показать отслеживаемые каналы\n"
         "/id [ссылка] - Показать ID канала\n"
-        "/status - Проверить состояние бота"
+        "/status - Проверить состояние бота\n"
+        "/change_promt [текст] - Изменить промпт для переписывания\n"
+        "/show_promt - Показать текущий промпт"
     )
     await message.answer(help_text)
 
@@ -224,6 +230,25 @@ async def status_check(message: Message):
         logger.error(f"Ошибка в команде status: {str(e)}")
         await message.reply("❌ Произошла ошибка при получении статуса")
 
+@dp.message(Command("change_promt"))
+async def change_prompt(message: Message):
+    global current_prompt
+    new_prompt = message.text.replace('/change_promt', '').strip()
+    
+    if not new_prompt:
+        return await message.reply("❌ Укажите новый промпт после команды")
+    
+    current_prompt = new_prompt
+    save_channels()
+    await message.reply(f"✅ Промпт успешно обновлен:\n`{new_prompt}`", parse_mode="Markdown")
+
+@dp.message(Command("show_promt"))
+async def show_prompt(message: Message):
+    await message.reply(
+        f"📝 Текущий промпт:\n`{current_prompt}`", 
+        parse_mode="Markdown"
+    )
+
 client_openai = AsyncOpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=api_ai,  # Ваш ключ OpenRouter
@@ -233,16 +258,11 @@ async def rewrite_text(text: str) -> str:
     """Переписывает текст через OpenRouter API"""
     try:
         response = await client_openai.chat.completions.create(
-            extra_headers={
-                "HTTP-Referer": "https://localhost",  # Замените на ваш домен
-                "X-Title": "Telegram Reposter",# Название вашего приложения
-            },
-            extra_body={},
             model="deepseek/deepseek-r1-zero:free",
             messages=[
                 {
                     "role": "system",
-                    "content": "Перепиши текст, сохранив все факты и структуру. Не применяй никакое форматирование . Измени только формулировки."
+                    "content": f"{current_prompt}. Не применяй никакое форматирование"  # Используем текущий промпт
                 },
                 {
                     "role": "user", 
