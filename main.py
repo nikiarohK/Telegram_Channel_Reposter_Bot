@@ -230,10 +230,10 @@ async def status_check(message: Message):
         logger.error(f"Ошибка в команде status: {str(e)}")
         await message.reply("❌ Произошла ошибка при получении статуса")
 
-@dp.message(Command("change_promt"))
+@dp.message(Command("change_prompt"))
 async def change_prompt(message: Message):
     global current_prompt
-    new_prompt = message.text.replace('/change_promt', '').strip()
+    new_prompt = message.text.replace('/change_prompt', '').strip()
     
     if not new_prompt:
         return await message.reply("❌ Укажите новый промпт после команды")
