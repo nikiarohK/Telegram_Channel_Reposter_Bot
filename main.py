@@ -8,6 +8,9 @@ from aiogram.types import Message
 from config import api_id, api_hash, bot_token, api_ai
 from telethon import types
 from openai import AsyncOpenAI
+import re
+from tenacity import retry, stop_after_attempt
+
 
 
 # Настройка логирования
@@ -249,32 +252,36 @@ async def show_prompt(message: Message):
         parse_mode="Markdown"
     )
 
+
 client_openai = AsyncOpenAI(
     base_url="https://openrouter.ai/api/v1",
-    api_key=api_ai,  # Ваш ключ OpenRouter
+    api_key=api_ai,
 )
 
 async def rewrite_text(text: str) -> str:
-    """Переписывает текст через OpenRouter API"""
+    """Переписывает текст, удаляя всё лишнее"""
     try:
         response = await client_openai.chat.completions.create(
-            model="deepseek/deepseek-r1-zero:free",
+            model="deepseek/deepseek-r1:free",
             messages=[
                 {
                     "role": "system",
-                    "content": f"{current_prompt}. Не применяй никакое форматирование"  # Используем текущий промпт
+                    "content": (
+                        f"{current_prompt}"
+                    )
                 },
-                {
-                    "role": "user", 
-                    "content": text
-                }
+                {"role": "user", "content": text}
             ],
-            temperature=0.8,
-            max_tokens=2000
+            temperature=1, 
+            max_tokens=1000
         )
-        return response.choices[0].message.content
+        
+        result = response.choices[0].message.content
+
+        return result
+        
     except Exception as e:
-        logger.error(f"OpenRouter API Error: {str(e)}")
+        logger.error(f"Ошибка: {str(e)}")
         return None
 
 @telethon_client.on(events.NewMessage)
@@ -286,37 +293,79 @@ async def message_handler(event):
         return
 
     try:
-        # Оригинальные данные
         original_text = event.message.text
         media = event.message.media
-        entities = event.message.entities
         link_preview = isinstance(media, types.MessageMediaWebPage)
-
-        # Модифицируем только текст
+        
+        # Модификация текста
         modified_text = await rewrite_text(original_text) if original_text else None
+        
+        # Очистка текста
+        if modified_text:
+            modified_text = (
+                modified_text.replace("\\boxed{", "")
+                .replace("}", "")
+                .replace("*", "")
+                .replace("_", "")
+                .strip()
+            )
+
         final_text = modified_text or original_text
 
-        # Собираем параметры сообщения
-        send_args = {
-            "entity": int(main_channel_id),
-            "message": final_text,
-            "file": media,
-            "formatting_entities": entities,
-            "link_preview": link_preview
-        }
+        # Обработка медиа-альбомов
+        if media and event.message.grouped_id:
+            # Получаем весь альбом
+            album = []
+            async for message in telethon_client.iter_messages(
+                await event.get_chat(),
+                limit=10,
+                offset_id=event.message.id - 1,
+                reverse=True
+            ):
+                if message.grouped_id == event.message.grouped_id:
+                    album.append(message)
+                    if len(album) >= 10:  # Максимум 10 элементов в альбоме
+                        break
 
-        # Убираем упоминание автора для медиа
-        if media and not isinstance(media, types.MessageMediaWebPage):
-            send_args["silent"] = True
+            # Собираем медиафайлы
+            media_files = []
+            for msg in album:
+                if msg.media:
+                    media_files.append(msg.media)
 
-        await telethon_client.send_message(**send_args)
+            # Отправляем как единый альбом
+            await telethon_client.send_file(
+                entity=int(main_channel_id),
+                file=media_files,
+                caption=final_text,
+                link_preview=link_preview,
+                parse_mode='html',
+                as_album=True  # Ключевой параметр для альбома
+            )
+
+        elif media:
+            # Отправка одиночного медиа
+            await telethon_client.send_file(
+                entity=int(main_channel_id),
+                file=media,
+                caption=final_text,
+                link_preview=link_preview
+            )
+        else:
+            # Отправка только текста
+            await telethon_client.send_message(
+                entity=int(main_channel_id),
+                message=final_text,
+                link_preview=link_preview
+            )
+
         logger.info(f"Переработано: {event.chat_id} → {main_channel_id}")
 
     except Exception as e:
         logger.error(f"Ошибка: {str(e)}")
-
+        
 async def main():
-    # await telethon_client.start()
+    await telethon_client.start()
     logger.info("Telethon клиент запущен")
     await dp.start_polling(bot)
 
